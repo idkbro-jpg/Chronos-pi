@@ -1,0 +1,22 @@
+# Chronos-pi Konfiguration
+
+bot:
+  name: "Chronos-pi"
+  prefix: "pi!"
+  status: "watching the Pi"
+
+# Standardmäßig Testmode an (solange kein echter Pi da ist)
+testmode_default: true
+
+# Nur diese User dürfen kritische Befehle ausführen
+allowed_users:
+  - 123456789012345678   # <-- deine Discord User-ID hier eintragen
+
+# Channels
+channels:
+  main: 1111111111111111111
+  bridge: 2222222222222222222
+
+bridge_marker: "[CHRONOS]"
+
+mix_file: "mix.yml"

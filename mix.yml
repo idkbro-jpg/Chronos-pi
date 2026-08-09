@@ -1,0 +1,23 @@
+# Gemeinsame Alias- / Routing-Datei für das Chronos-Ökosystem
+# Beide Instanzen (Chronos + Chronos-pi) können diese Datei laden.
+
+aliases:
+  ping-all:
+    description: "Beide Bots antworten mit Pong"
+    targets:
+      - main
+      - pi
+    action: "ping"
+
+  status:
+    description: "Status beider Instanzen abfragen"
+    targets:
+      - both
+    action: "status"
+
+  # Beispiel für später:
+  # start-laptop:
+  #   targets: [pi]
+  #   action: "wol"
+  #   params:
+  #     mac: "00:11:22:33:44:55"
