@@ -5,14 +5,15 @@ bot:
   prefix: "pi!"
   status: "watching the Pi"
 
-# Standardmäßig Testmode an (solange kein echter Pi da ist)
+# Standardmäßig Testmode an (solange kein echter Pi da ist / zum Testen)
 testmode_default: true
 
 # Nur diese User dürfen kritische Befehle ausführen
+# Füge deine echte Discord User-ID ein (pi!whoami)
 allowed_users:
   - 123456789012345678   # <-- deine Discord User-ID hier eintragen
 
-# Channels
+# Channels (IDs als Zahlen)
 channels:
   main: 1111111111111111111
   bridge: 2222222222222222222
