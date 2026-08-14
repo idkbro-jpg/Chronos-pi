@@ -1,1 +1,42 @@
-PLACEHOLDER
+# Chronos-pi Konfiguration
+
+bot:
+  name: "Chronos-pi"
+  prefix: "pi!"
+  status: "watching the Pi"
+
+# Standardmäßig Testmode an (solange kein echter Pi da ist / zum Testen)
+testmode_default: true
+
+# Nur diese User dürfen kritische Befehle ausführen
+# Füge deine echte Discord User-ID ein (pi!whoami)
+allowed_users:
+  - 123456789012345678   # <-- deine Discord User-ID hier eintragen
+
+# Channels (IDs als Zahlen)
+channels:
+  main: 1111111111111111111
+  bridge: 2222222222222222222
+
+bridge_marker: "[CHRONOS]"
+
+mix_file: "mix.yml"
+
+# Optional: Default-MAC für pi!wol ohne Argument
+# wol:
+#   default_mac: "aa:bb:cc:dd:ee:ff"
+
+# Optional: extra erlaubte Verzeichnisse für pi!serve (zusätzlich zu /tmp und CWD)
+# safe_serve_dirs:
+#   - /home/pi/share
+
+# Optional limits (defaults are fine for most Pi setups)
+# limits:
+#   run_timeout_sec: 60
+#   run_max_output: 1800
+#   serve_max_minutes: 60
+
+# Optional rate limit for privileged commands
+# rate_limit:
+#   max_commands: 15
+#   window_seconds: 60
