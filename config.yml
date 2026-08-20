@@ -26,7 +26,8 @@ mix_file: "mix.yml"
 # wol:
 #   default_mac: "aa:bb:cc:dd:ee:ff"
 
-# Optional: extra erlaubte Verzeichnisse für pi!serve (zusätzlich zu /tmp und CWD)
+# Optional: extra erlaubte Verzeichnisse für pi!serve / pi!echo
+# (zusätzlich zu /tmp und CWD)
 # safe_serve_dirs:
 #   - /home/pi/share
 
@@ -35,8 +36,18 @@ mix_file: "mix.yml"
 #   run_timeout_sec: 60
 #   run_max_output: 1800
 #   serve_max_minutes: 60
+#   serve_max_concurrent: 5
+#   echo_max_chars: 100000
 
 # Optional rate limit for privileged commands
 # rate_limit:
 #   max_commands: 15
 #   window_seconds: 60
+
+# Optional hardening for pi!run (default: unrestricted – no behaviour change)
+# execution:
+#   mode: allowlist          # or "unrestricted"
+#   allowed_patterns:
+#     - "uptime"
+#     - "df -h*"
+#     - "re:^vcgencmd\\b"

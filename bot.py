@@ -6,11 +6,13 @@ Self-contained. Matches the README feature set:
   - TESTMODE (default on) vs LIVE
   - Privileged commands gated by allowed_users + rate limit + TESTMODE
   - Safe path handling for echo/serve
-  - Temporary HTTP servers with auto-stop
+  - Temporary HTTP servers with auto-stop + manual stop
   - Wake-on-LAN
   - Pi-aware sysinfo
-  - Bridge channel support
-  - Daily log files + console
+  - Bridge channel support (ack-only, never auto-execute)
+  - Optional allowlist for `run` (default: unrestricted)
+  - Daily human logs + structured JSONL events
+  - Config / mix reload without restart
 
 Never commit a real .env / token.
 """
@@ -49,11 +51,13 @@ MIX_PATH = ROOT / "mix.yml"
 LOGS_DIR = ROOT / "logs"
 ENV_PATH = ROOT / ".env"
 
+VERSION = "1.1.0"
+
 PLACEHOLDER_UID = 123456789012345678
 PLACEHOLDER_CHANNEL = 1111111111111111111
 
 # ---------------------------------------------------------------------------
-# Logging (daily files + console)
+# Logging (daily human files + separate structured JSONL)
 # ---------------------------------------------------------------------------
 
 def _setup_logging() -> logging.Logger:
@@ -92,7 +96,7 @@ def log_event(
     detail: str = "",
     extra: Optional[dict] = None,
 ) -> None:
-    """Structured JSON line for easy grepping / later analysis."""
+    """Structured JSON line for easy grepping / later analysis (separate file)."""
     record = {
         "ts": datetime.now(timezone.utc).isoformat(),
         "kind": kind,
@@ -104,7 +108,7 @@ def log_event(
         record["extra"] = extra
     try:
         day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        path = LOGS_DIR / f"chronos-pi-{day}.log"
+        path = LOGS_DIR / f"chronos-pi-events-{day}.jsonl"
         with open(path, "a", encoding="utf-8") as f:
             f.write(json.dumps(record, ensure_ascii=False) + "\n")
     except Exception as e:
@@ -145,10 +149,18 @@ def _defaults() -> Dict[str, Any]:
             "run_timeout_sec": 60,
             "run_max_output": 1800,
             "serve_max_minutes": 60,
+            "serve_max_concurrent": 5,
+            "echo_max_chars": 100000,
         },
         "rate_limit": {
             "max_commands": 15,
             "window_seconds": 60,
+        },
+        "execution": {
+            # "unrestricted" (default) or "allowlist"
+            "mode": "unrestricted",
+            # patterns: plain exact, glob (* ?), or re:REGEX  (same rules as main Chronos)
+            "allowed_patterns": [],
         },
     }
 
@@ -243,6 +255,14 @@ def serve_max_minutes() -> int:
     return int((get_cfg().get("limits") or {}).get("serve_max_minutes") or 60)
 
 
+def serve_max_concurrent() -> int:
+    return int((get_cfg().get("limits") or {}).get("serve_max_concurrent") or 5)
+
+
+def echo_max_chars() -> int:
+    return int((get_cfg().get("limits") or {}).get("echo_max_chars") or 100000)
+
+
 def rate_limit_max() -> int:
     return int((get_cfg().get("rate_limit") or {}).get("max_commands") or 15)
 
@@ -264,6 +284,18 @@ def safe_serve_dirs() -> List[Path]:
         except Exception:
             continue
     return out
+
+
+def execution_mode() -> str:
+    mode = str((get_cfg().get("execution") or {}).get("mode") or "unrestricted").lower().strip()
+    if mode not in ("unrestricted", "allowlist"):
+        return "unrestricted"
+    return mode
+
+
+def allowed_patterns() -> List[str]:
+    pats = (get_cfg().get("execution") or {}).get("allowed_patterns") or []
+    return [str(p) for p in pats if p]
 
 
 # ---------------------------------------------------------------------------
@@ -301,8 +333,50 @@ def check_rate_limit(user_id: int) -> Tuple[bool, int]:
     return True, 0
 
 
+def command_allowed_by_policy(command: str) -> Tuple[bool, str]:
+    """
+    When execution.mode is allowlist, only commands matching allowed_patterns may run.
+
+    Pattern kinds (same as main Chronos):
+      - plain string without * or ?  → exact full-string match
+      - glob (* and ?)               → full-string glob match
+      - re:REGEX                     → re.search on the whole command
+
+    Intentionally no loose substring match.
+    """
+    mode = execution_mode()
+    if mode != "allowlist":
+        return True, ""
+
+    patterns = allowed_patterns()
+    if not patterns:
+        return False, "allowlist mode with empty allowed_patterns – blocked"
+
+    cmd = command.strip()
+    for pat in patterns:
+        if not pat:
+            continue
+        if pat.startswith("re:"):
+            try:
+                if re.search(pat[3:], cmd):
+                    return True, ""
+            except re.error:
+                continue
+            continue
+
+        # Glob / exact: always fullmatch after translating * and ?
+        try:
+            regex = re.escape(pat).replace(r"\*", ".*").replace(r"\?", ".")
+            if re.fullmatch(regex, cmd):
+                return True, ""
+        except re.error:
+            continue
+
+    return False, "command not in allowlist (mode=allowlist)"
+
+
 # ---------------------------------------------------------------------------
-# Helpers – safety, paths, shell, WOL, sysinfo
+# Helpers – safety, paths, shell, WOL, sysinfo, network
 # ---------------------------------------------------------------------------
 
 _MAC_RE = re.compile(r"^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$")
@@ -380,7 +454,10 @@ def run_shell(cmd: str, timeout: int) -> Tuple[int, str, str]:
                 proc.kill()
             except Exception:
                 pass
-            proc.wait(timeout=2)
+            try:
+                proc.wait(timeout=2)
+            except Exception:
+                pass
             return 124, "", f"Command timed out after {timeout}s (killed)"
         stdout = (stdout_b or b"").decode("utf-8", errors="replace")
         stderr = (stderr_b or b"").decode("utf-8", errors="replace")
@@ -397,6 +474,32 @@ def _read_file_safe(path: Path, max_bytes: int = 4096) -> str:
         return data.decode("utf-8", errors="replace").strip()
     except Exception:
         return ""
+
+
+def get_local_ips() -> List[str]:
+    """Best-effort non-loopback IPv4 addresses for this host (useful for serve URLs)."""
+    ips: List[str] = []
+    try:
+        # Primary: connect trick (doesn't actually send packets)
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            s.connect(("8.8.8.8", 80))
+            ip = s.getsockname()[0]
+            if ip and not ip.startswith("127."):
+                ips.append(ip)
+        finally:
+            s.close()
+    except Exception:
+        pass
+    try:
+        hostname = socket.gethostname()
+        for info in socket.getaddrinfo(hostname, None, socket.AF_INET):
+            ip = info[4][0]
+            if ip and not ip.startswith("127.") and ip not in ips:
+                ips.append(ip)
+    except Exception:
+        pass
+    return ips
 
 
 def gather_sysinfo() -> str:
@@ -485,6 +588,11 @@ def gather_sysinfo() -> str:
     except Exception:
         pass
 
+    # Local IPs (handy for serve)
+    ips = get_local_ips()
+    if ips:
+        lines.append(f"**LAN IP(s):** `{', '.join(ips)}`")
+
     return "\n".join(lines) if lines else "_Could not collect sysinfo_"
 
 
@@ -518,6 +626,11 @@ def _start_http_server(directory: Path, port: int, minutes: int) -> Tuple[bool, 
     with _server_lock:
         if port in _active_servers:
             return False, f"Port {port} already in use by a temp server"
+        if len(_active_servers) >= serve_max_concurrent():
+            return False, (
+                f"Max concurrent temp servers reached "
+                f"({serve_max_concurrent()}). Stop one first."
+            )
 
     # Handler that serves a specific directory without process-wide chdir
     class DirHandler(QuietHandler):
@@ -551,7 +664,14 @@ def _start_http_server(directory: Path, port: int, minutes: int) -> Tuple[bool, 
         _stop_http_server(port, reason="auto-timeout")
 
     threading.Thread(target=_auto_stop, daemon=True).start()
-    return True, f"Serving `{directory}` on port **{port}** for {minutes} min"
+
+    ips = get_local_ips()
+    urls = [f"http://{ip}:{port}/" for ip in ips] if ips else [f"http://<pi-ip>:{port}/"]
+    url_line = " · ".join(f"`{u}`" for u in urls)
+    return True, (
+        f"Serving `{directory}` on port **{port}** for {minutes} min\n"
+        f"Access: {url_line}"
+    )
 
 
 def _stop_http_server(port: int, reason: str = "manual") -> bool:
@@ -673,19 +793,21 @@ def privileged():
 async def cmd_help(ctx: commands.Context):
     p = prefix()
     text = (
-        f"**Chronos-pi help** (prefix `{p}`)\n"
+        f"**Chronos-pi help** v{VERSION} (prefix `{p}`)\n"
         f"```\n"
         f"{p}help                 this message\n"
         f"{p}ping                 latency\n"
         f"{p}status               mode + servers + uptime\n"
-        f"{p}sysinfo              host / temp / mem / disk\n"
+        f"{p}sysinfo              host / temp / mem / disk / IPs\n"
         f"{p}whoami               your Discord user id\n"
         f"{p}bridge <text>        send to bridge channel\n"
         f"{p}TESTMODE [on|off]    toggle test mode\n"
+        f"{p}reload               reload config.yml + mix.yml\n"
         f"{p}wol [mac]            Wake-on-LAN (LIVE only)\n"
         f"{p}run <cmd>            shell command (LIVE only)\n"
         f"{p}echo <file> <text>   write file (LIVE only, safe dirs)\n"
         f"{p}serve [dir] [port] [min]  temp HTTP server (LIVE only)\n"
+        f"{p}stopserve [port]     stop a temp HTTP server (LIVE only)\n"
         f"{p}servestatus          list active temp servers\n"
         f"```\n"
         f"_Privileged actions are blocked while TESTMODE is on._"
@@ -706,11 +828,13 @@ async def cmd_status(ctx: commands.Context):
     with _server_lock:
         servers = len(_active_servers)
     allowed_n = len(allowed_user_ids())
+    exec_mode = execution_mode()
     await ctx.reply(
-        f"**Chronos-pi status**\n"
+        f"**Chronos-pi status** v{VERSION}\n"
         f"mode: **{mode}**\n"
+        f"execution: `{exec_mode}`\n"
         f"allowed_users: `{allowed_n}`\n"
-        f"active temp servers: `{servers}`\n"
+        f"active temp servers: `{servers}` / `{serve_max_concurrent()}`\n"
         f"guilds: `{len(bot.guilds)}`"
     )
 
@@ -783,6 +907,28 @@ async def cmd_testmode(ctx: commands.Context, state: Optional[str] = None):
     )
 
 
+@bot.command(name="reload")
+@privileged()
+async def cmd_reload(ctx: commands.Context):
+    """Reload config.yml and mix.yml without restarting the bot."""
+    load_config()
+    load_mix()
+    # Note: testmode is intentionally NOT reset – only changes via TESTMODE command
+    # or next process start (testmode_default).
+    await ctx.reply(
+        f"✅ Reloaded config + mix.\n"
+        f"execution.mode=`{execution_mode()}` · "
+        f"allowed_users=`{len(allowed_user_ids())}` · "
+        f"serve_max_concurrent=`{serve_max_concurrent()}`"
+    )
+    log_event(
+        "reload",
+        user_id=ctx.author.id,
+        user_name=str(ctx.author),
+        detail=f"mode={execution_mode()}",
+    )
+
+
 @bot.command(name="wol")
 @privileged()
 async def cmd_wol(ctx: commands.Context, mac: Optional[str] = None):
@@ -811,6 +957,18 @@ async def cmd_run(ctx: commands.Context, *, command: str = ""):
         await ctx.reply("Usage: `pi!run <shell command>`")
         return
     if not await _testmode_gate(ctx, f"run `{command[:80]}`"):
+        return
+
+    allowed, reason = command_allowed_by_policy(command)
+    if not allowed:
+        await ctx.reply(f"⛔ Policy: {reason}")
+        log_event(
+            "run_denied_policy",
+            user_id=ctx.author.id,
+            user_name=str(ctx.author),
+            detail=command[:300],
+            extra={"reason": reason},
+        )
         return
 
     timeout = run_timeout()
@@ -847,6 +1005,13 @@ async def cmd_echo(ctx: commands.Context, path: str = "", *, text: str = ""):
         return
     target = Path(path)
     if not await _testmode_gate(ctx, f"echo into `{target}`"):
+        return
+
+    if len(text) > echo_max_chars():
+        await ctx.reply(
+            f"⛔ Text too long ({len(text)} chars). "
+            f"Limit is {echo_max_chars()} (config `limits.echo_max_chars`)."
+        )
         return
 
     if not _is_path_allowed(target, safe_serve_dirs()):
@@ -893,6 +1058,27 @@ async def cmd_serve(
         )
 
 
+@bot.command(name="stopserve")
+@privileged()
+async def cmd_stopserve(ctx: commands.Context, port: Optional[int] = None):
+    if port is None:
+        await ctx.reply("Usage: `pi!stopserve <port>`  (see `pi!servestatus`)")
+        return
+    if not await _testmode_gate(ctx, f"stopserve port {port}"):
+        return
+    ok = await asyncio.to_thread(_stop_http_server, port, "manual")
+    if ok:
+        await ctx.reply(f"✅ Stopped temp server on port `{port}`")
+        log_event(
+            "serve_stop",
+            user_id=ctx.author.id,
+            user_name=str(ctx.author),
+            detail=str(port),
+        )
+    else:
+        await ctx.reply(f"❌ No active temp server on port `{port}`")
+
+
 @bot.command(name="servestatus")
 async def cmd_servestatus(ctx: commands.Context):
     await ctx.reply(list_servers())
@@ -919,6 +1105,12 @@ async def on_ready():
         if not cid or cid == PLACEHOLDER_CHANNEL or cid == 2222222222222222222:
             log.warning("⚠️  channels.%s looks like a placeholder (%s)", name, cid)
 
+    if execution_mode() == "allowlist" and not allowed_patterns():
+        log.warning(
+            "⚠️  execution.mode=allowlist but allowed_patterns is empty – "
+            "all `run` commands will be blocked."
+        )
+
     activity = discord.Activity(
         type=discord.ActivityType.watching,
         name=str(get_cfg().get("bot", {}).get("status") or "the Pi"),
@@ -926,13 +1118,15 @@ async def on_ready():
     await bot.change_presence(activity=activity)
 
     log.info(
-        "Logged in as %s (ID %s) | TESTMODE=%s | prefix=%s",
+        "Logged in as %s (ID %s) | v%s | TESTMODE=%s | prefix=%s | exec=%s",
         bot.user,
         bot.user.id if bot.user else "?",
+        VERSION,
         testmode,
         prefix(),
+        execution_mode(),
     )
-    log_event("startup", detail=f"testmode={testmode}")
+    log_event("startup", detail=f"v{VERSION} testmode={testmode} exec={execution_mode()}")
 
 
 @bot.event
@@ -969,7 +1163,7 @@ async def on_message(message: discord.Message):
             elif low in ("ping", "status"):
                 try:
                     await message.reply(
-                        f"Chronos-pi here · TESTMODE={'on' if testmode else 'off'}"
+                        f"Chronos-pi v{VERSION} · TESTMODE={'on' if testmode else 'off'}"
                     )
                 except Exception:
                     pass
