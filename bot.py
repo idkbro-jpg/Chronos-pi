@@ -51,7 +51,7 @@ MIX_PATH = ROOT / "mix.yml"
 LOGS_DIR = ROOT / "logs"
 ENV_PATH = ROOT / ".env"
 
-VERSION = "1.1.1"
+VERSION = "1.1.2"
 
 PLACEHOLDER_UID = 123456789012345678
 PLACEHOLDER_CHANNEL = 1111111111111111111
@@ -59,6 +59,9 @@ PLACEHOLDER_CHANNEL = 1111111111111111111
 # ---------------------------------------------------------------------------
 # Logging (daily human files + separate structured JSONL)
 # ---------------------------------------------------------------------------
+
+_log_lock = threading.Lock()
+
 
 def _setup_logging() -> logging.Logger:
     LOGS_DIR.mkdir(parents=True, exist_ok=True)
@@ -109,8 +112,11 @@ def log_event(
     try:
         day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         path = LOGS_DIR / f"chronos-pi-events-{day}.jsonl"
-        with open(path, "a", encoding="utf-8") as f:
-            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+        line = json.dumps(record, ensure_ascii=False) + "\n"
+        with _log_lock:
+            with open(path, "a", encoding="utf-8") as f:
+                f.write(line)
+                f.flush()
     except Exception as e:
         log.warning("Failed to write structured log: %s", e)
     # human-readable console / file line
@@ -304,6 +310,7 @@ def allowed_patterns() -> List[str]:
 
 testmode: bool = True  # set from config on startup
 _rate_hits: Dict[int, Deque[float]] = defaultdict(deque)
+_rate_lock = threading.Lock()
 _active_servers: Dict[int, dict] = {}  # port -> metadata
 _server_lock = threading.Lock()
 _shutting_down = False
@@ -319,18 +326,19 @@ def is_allowed(user_id: int) -> bool:
 
 def check_rate_limit(user_id: int) -> Tuple[bool, int]:
     """Returns (allowed, retry_after_seconds)."""
-    now = time.time()
-    window = rate_limit_window()
-    limit = rate_limit_max()
-    q = _rate_hits[user_id]
-    while q and now - q[0] > window:
-        q.popleft()
-    if len(q) >= limit:
-        oldest = q[0] if q else now
-        retry = max(1, int(window - (now - oldest)) + 1)
-        return False, retry
-    q.append(now)
-    return True, 0
+    with _rate_lock:
+        now = time.time()
+        window = rate_limit_window()
+        limit = rate_limit_max()
+        q = _rate_hits[user_id]
+        while q and now - q[0] > window:
+            q.popleft()
+        if len(q) >= limit:
+            oldest = q[0] if q else now
+            retry = max(1, int(window - (now - oldest)) + 1)
+            return False, retry
+        q.append(now)
+        return True, 0
 
 
 def command_allowed_by_policy(command: str) -> Tuple[bool, str]:
@@ -423,10 +431,40 @@ def _is_path_allowed(target: Path, extra_dirs: Optional[List[Path]] = None) -> b
     return False
 
 
+def _kill_process_group(proc: subprocess.Popen) -> None:
+    """Best-effort terminate of the whole process group (shell + children)."""
+    if proc.pid is None:
+        return
+    try:
+        os.killpg(proc.pid, signal.SIGTERM)
+    except (ProcessLookupError, PermissionError, OSError):
+        try:
+            proc.terminate()
+        except Exception:
+            pass
+    try:
+        proc.wait(timeout=3)
+        return
+    except subprocess.TimeoutExpired:
+        pass
+    try:
+        os.killpg(proc.pid, signal.SIGKILL)
+    except (ProcessLookupError, PermissionError, OSError):
+        try:
+            proc.kill()
+        except Exception:
+            pass
+    try:
+        proc.wait(timeout=2)
+    except Exception:
+        pass
+
+
 def run_shell(cmd: str, timeout: int) -> Tuple[int, str, str]:
     """
     Run a shell command with hard timeout and process-group kill.
     Returns (returncode, stdout, stderr).
+    Uses SIGTERM then SIGKILL (aligned with main Chronos) so children can clean up.
     """
     env = os.environ.copy()
     env["PYTHONUNBUFFERED"] = "1"
@@ -446,19 +484,14 @@ def run_shell(cmd: str, timeout: int) -> Tuple[int, str, str]:
         try:
             stdout_b, stderr_b = proc.communicate(timeout=timeout)
         except subprocess.TimeoutExpired:
+            _kill_process_group(proc)
             try:
-                os.killpg(proc.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-            try:
-                proc.kill()
-            except Exception:
-                pass
-            try:
-                proc.wait(timeout=2)
-            except Exception:
-                pass
-            return 124, "", f"Command timed out after {timeout}s (killed)"
+                stdout_b, stderr_b = proc.communicate(timeout=2)
+            except subprocess.TimeoutExpired:
+                stdout_b, stderr_b = b"", b""
+            return 124, (stdout_b or b"").decode("utf-8", errors="replace"), (
+                f"Command timed out after {timeout}s (killed)"
+            )
         stdout = (stdout_b or b"").decode("utf-8", errors="replace")
         stderr = (stderr_b or b"").decode("utf-8", errors="replace")
         return proc.returncode if proc.returncode is not None else 1, stdout, stderr
