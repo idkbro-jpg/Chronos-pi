@@ -3,7 +3,7 @@
 Zweite Instanz des Chronos-Ökosystems – gedacht für den Raspberry Pi (und andere Linux-Hosts).  
 Kann über den Bridge-Channel mit dem Haupt-Chronos kommunizieren.
 
-**Version:** 1.1.2
+**Version:** 1.1.3
 
 ## Wichtig: TESTMODE
 
@@ -41,6 +41,7 @@ pi!TESTMODE off      # explizit aus
 | `pi!serve [folder] [port] [min]`| Temporärer HTTP-Server (auto-stop, zeigt LAN-IP)  | ja             |
 | `pi!stopserve <port>`           | Temporären HTTP-Server manuell beenden            | ja             |
 | `pi!servestatus`                | Aktive temp. HTTP-Server auflisten                | –              |
+| `pi!aliases`                    | mix.yml-Aliase anzeigen (nur Info, keine Ausführung) | –           |
 
 ## Setup
 
@@ -53,25 +54,12 @@ pi!TESTMODE off      # explizit aus
 
 ### Optional: systemd (user service)
 
-```ini
-[Unit]
-Description=Chronos-pi
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=simple
-WorkingDirectory=%h/Chronos-pi
-ExecStart=%h/Chronos-pi/venv/bin/python bot.py
-Restart=always
-RestartSec=5
-Environment=PYTHONUNBUFFERED=1
-
-[Install]
-WantedBy=default.target
-```
+A ready-to-copy unit file lives in `systemd/chronos-pi.service`.
 
 ```bash
+mkdir -p ~/.config/systemd/user
+cp systemd/chronos-pi.service ~/.config/systemd/user/
+# Adjust WorkingDirectory / ExecStart if the repo is not in $HOME/Chronos-pi
 systemctl --user daemon-reload
 systemctl --user enable --now chronos-pi.service
 ```
@@ -103,6 +91,9 @@ Bridge-`do`-Nachrichten werden **nur bestätigt**, nie automatisch ausgeführt (
 - Bridge-Channel sollte privat sein
 - TESTMODE ist standardmäßig an – erst ausschalten, wenn du weißt was du tust
 - Beim Shutdown werden temp. HTTP-Server best-effort beendet
+- TESTMODE bleibt nach Discord-Reconnects erhalten (wird nicht still auf den Default zurückgesetzt)
+- Beispiel-User-IDs in `allowed_users` zählen nicht als echte Freigabe
+- `pi!run` begrenzt Discord-Spam (`limits.run_max_chunks`, default 4)
 
 ## Optional config
 
@@ -119,6 +110,7 @@ limits:
   serve_max_minutes: 60
   serve_max_concurrent: 5
   echo_max_chars: 100000
+  run_max_chunks: 4
 
 rate_limit:
   max_commands: 15
