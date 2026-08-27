@@ -10,6 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 import bot  # noqa: E402
+import pi_runtime  # noqa: E402
 
 
 def test_normalize_mac():
@@ -38,13 +39,9 @@ def test_command_policy_allowlist_exact_and_glob_and_re():
     assert bot.command_allowed_by_policy("echo vcgencmd")[0] is False
 
 
-def test_placeholder_ids_stripped():
-    cfg = bot._defaults()
-    cfg["allowed_users"] = [bot.PLACEHOLDER_UID, "0", 42]
-    bot._cfg = cfg
-    assert bot.allowed_user_ids() == {42}
-    assert bot.is_allowed(bot.PLACEHOLDER_UID) is False
-    assert bot.is_allowed(42) is True
+def test_placeholder_ids_stripped_via_runtime():
+    ids = pi_runtime.allowed_user_ids([bot.PLACEHOLDER_UID, "0", 42], bot.PLACEHOLDER_UID)
+    assert ids == {42}
 
 
 def test_path_allowed_tmp_and_cwd_not_root():
@@ -64,9 +61,16 @@ def test_chunk_and_safe_code():
     assert "```" not in bot._safe_code("```rm```") or "\u200b" in bot._safe_code("```")
 
 
+def test_pi_runtime_placeholder_and_reconnect_flag():
+    assert pi_runtime.allowed_user_ids([pi_runtime.PLACEHOLDER_UID, 7]) == {7}
+    assert pi_runtime.should_init_testmode(False) is True
+    assert pi_runtime.should_init_testmode(True) is False
+    assert pi_runtime.run_max_chunks({"run_max_chunks": 99}) == 10
+    assert pi_runtime.mix_aliases({"aliases": {"a": {}}}) == {"a": {}}
+
+
 def test_mix_aliases_loaded():
-    bot._mix = {"aliases": {"ping-all": {"action": "ping", "targets": ["pi"]}}}
-    aliases = bot.mix_aliases()
+    aliases = pi_runtime.mix_aliases({"aliases": {"ping-all": {"action": "ping", "targets": ["pi"]}}})
     assert "ping-all" in aliases
 
 

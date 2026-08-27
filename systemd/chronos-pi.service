@@ -6,7 +6,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 WorkingDirectory=%h/Chronos-pi
-ExecStart=%h/Chronos-pi/venv/bin/python bot.py
+ExecStart=%h/Chronos-pi/venv/bin/python start.py
 Restart=always
 RestartSec=5
 Environment=PYTHONUNBUFFERED=1
