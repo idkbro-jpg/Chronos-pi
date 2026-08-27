@@ -43,6 +43,8 @@ pi!TESTMODE off      # explizit aus
 | `pi!servestatus`                | Aktive temp. HTTP-Server auflisten                | –              |
 | `pi!aliases`                    | mix.yml-Aliase anzeigen (nur Info, keine Ausführung) | –           |
 
+`pi!aliases` is documented for the next bot.py pass. Current `start.py` does not add that command.
+
 ## Setup
 
 1. `python3 -m venv venv && source venv/bin/activate`
@@ -50,7 +52,15 @@ pi!TESTMODE off      # explizit aus
 3. `.env.example` → `.env` kopieren und Token eintragen
 4. In `config.yml` deine User-ID(s) + Channel-IDs eintragen
 5. Discord Developer Portal → Message Content Intent aktivieren
-6. `python bot.py`
+6. `python start.py`  (preferred; keeps TESTMODE across Discord reconnects)
+
+`python bot.py` still starts the bot. Use `start.py` if you want the reconnect / placeholder-ID fixes.
+
+Sanity checks without a Discord login:
+
+```bash
+python tests/test_helpers.py
+```
 
 ### Optional: systemd (user service)
 
@@ -91,9 +101,8 @@ Bridge-`do`-Nachrichten werden **nur bestätigt**, nie automatisch ausgeführt (
 - Bridge-Channel sollte privat sein
 - TESTMODE ist standardmäßig an – erst ausschalten, wenn du weißt was du tust
 - Beim Shutdown werden temp. HTTP-Server best-effort beendet
-- TESTMODE bleibt nach Discord-Reconnects erhalten (wird nicht still auf den Default zurückgesetzt)
-- Beispiel-User-IDs in `allowed_users` zählen nicht als echte Freigabe
-- `pi!run` begrenzt Discord-Spam (`limits.run_max_chunks`, default 4)
+- Mit `start.py`: TESTMODE bleibt nach Discord-Reconnects erhalten
+- Mit `start.py`: Beispiel-User-IDs in `allowed_users` zählen nicht als echte Freigabe
 
 ## Optional config
 
@@ -110,15 +119,13 @@ limits:
   serve_max_minutes: 60
   serve_max_concurrent: 5
   echo_max_chars: 100000
-  run_max_chunks: 4
 
 rate_limit:
   max_commands: 15
   window_seconds: 60
 
-# Optional hardening for pi!run (default remains unrestricted)
 execution:
-  mode: allowlist          # or "unrestricted"
+  mode: allowlist
   allowed_patterns:
     - "uptime"
     - "df -h*"
