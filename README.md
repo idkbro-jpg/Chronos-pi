@@ -3,7 +3,7 @@
 Zweite Instanz des Chronos-Ökosystems – gedacht für den Raspberry Pi (und andere Linux-Hosts).  
 Kann über den Bridge-Channel mit dem Haupt-Chronos kommunizieren.
 
-**Version:** 1.1.3
+**Version:** 1.1.4
 
 ## Wichtig: TESTMODE
 
@@ -22,6 +22,8 @@ pi!TESTMODE          # umschalten
 pi!TESTMODE on       # explizit an
 pi!TESTMODE off      # explizit aus
 ```
+
+TESTMODE is applied from `testmode_default` only on the first Discord ready event. Reconnects no longer flip you back to the default.
 
 ## Commands
 
@@ -43,8 +45,6 @@ pi!TESTMODE off      # explizit aus
 | `pi!servestatus`                | Aktive temp. HTTP-Server auflisten                | –              |
 | `pi!aliases`                    | mix.yml-Aliase anzeigen (nur Info, keine Ausführung) | –           |
 
-`pi!aliases` is documented for the next bot.py pass. Current `start.py` does not add that command.
-
 ## Setup
 
 1. `python3 -m venv venv && source venv/bin/activate`
@@ -52,9 +52,7 @@ pi!TESTMODE off      # explizit aus
 3. `.env.example` → `.env` kopieren und Token eintragen
 4. In `config.yml` deine User-ID(s) + Channel-IDs eintragen
 5. Discord Developer Portal → Message Content Intent aktivieren
-6. `python start.py`  (preferred; keeps TESTMODE across Discord reconnects)
-
-`python bot.py` still starts the bot. Use `start.py` if you want the reconnect / placeholder-ID fixes.
+6. `python start.py`  (or `python bot.py` — same runtime now)
 
 Sanity checks without a Discord login:
 
@@ -90,9 +88,11 @@ Bridge-`do`-Nachrichten werden **nur bestätigt**, nie automatisch ausgeführt (
 ## Sicherheit
 
 - Nur User-IDs aus `allowed_users` dürfen privilegierte Befehle ausführen
+- Die Beispiel-User-ID aus `config.yml` zählt **nicht** als echte Freigabe
 - `pi!run`, `pi!echo`, `pi!wol`, `pi!serve`, `pi!stopserve` laufen **nur** im LIVE-Modus
 - `echo` und `serve` sind auf `/tmp`, CWD und optional `safe_serve_dirs` beschränkt (kein Path-Traversal)
-- `run` hat hard Timeout (60 s), Output-Truncation und Process-Group-Kill
+- `~` in Pfaden wird expandiert, danach gilt weiterhin die Directory-Allowlist
+- `run` hat hard Timeout (60 s), Output-Truncation, Chunk-Cap und Process-Group-Kill
 - Optional: `execution.mode: allowlist` + `allowed_patterns` (gleiche Regeln wie Haupt-Chronos)
 - Einfaches Rate-Limit für privilegierte Commands (konfigurierbar)
 - Max. gleichzeitige Temp-HTTP-Server (default 5)
@@ -101,8 +101,7 @@ Bridge-`do`-Nachrichten werden **nur bestätigt**, nie automatisch ausgeführt (
 - Bridge-Channel sollte privat sein
 - TESTMODE ist standardmäßig an – erst ausschalten, wenn du weißt was du tust
 - Beim Shutdown werden temp. HTTP-Server best-effort beendet
-- Mit `start.py`: TESTMODE bleibt nach Discord-Reconnects erhalten
-- Mit `start.py`: Beispiel-User-IDs in `allowed_users` zählen nicht als echte Freigabe
+- TESTMODE bleibt nach Discord-Reconnects erhalten
 
 ## Optional config
 
@@ -116,6 +115,7 @@ safe_serve_dirs:
 limits:
   run_timeout_sec: 60
   run_max_output: 1800
+  run_max_chunks: 4
   serve_max_minutes: 60
   serve_max_concurrent: 5
   echo_max_chars: 100000
@@ -147,4 +147,5 @@ No loose substring matching (so `uptime` does **not** authorize `rm …; uptime`
 ## Integration mit Haupt-Chronos
 
 `mix.yml` wird beim Start (und bei `pi!reload`) geladen (gemeinsame Aliase / Routing-Vorbereitung).  
+`pi!aliases` zeigt die Einträge nur an und führt nichts aus.  
 Das Bridge-Protokoll ist absichtlich simpel und erweiterbar.
