@@ -1,1 +1,1 @@
-see file /tmp/cpi/bot.py
+PLACEHOLDER_WILL_REPLACE
