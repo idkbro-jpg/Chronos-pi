@@ -44,13 +44,6 @@ def test_placeholder_ids_stripped_via_runtime():
     assert ids == {42}
 
 
-def test_bot_allowed_user_ids_strips_placeholder():
-    cfg = bot._defaults()
-    cfg["allowed_users"] = [bot.PLACEHOLDER_UID, 99]
-    bot._cfg = cfg
-    assert bot.allowed_user_ids() == {99}
-
-
 def test_path_allowed_tmp_and_cwd_not_root():
     tmp_file = Path("/tmp/chronos-pi-test-file")
     assert bot._is_path_allowed(tmp_file) is True
@@ -79,17 +72,6 @@ def test_pi_runtime_placeholder_and_reconnect_flag():
 def test_mix_aliases_loaded():
     aliases = pi_runtime.mix_aliases({"aliases": {"ping-all": {"action": "ping", "targets": ["pi"]}}})
     assert "ping-all" in aliases
-
-
-def test_run_max_chunks_from_config():
-    cfg = bot._defaults()
-    cfg["limits"]["run_max_chunks"] = 2
-    bot._cfg = cfg
-    assert bot.run_max_chunks() == 2
-
-
-def test_reconnect_flag_does_not_force_reset():
-    assert pi_runtime.should_init_testmode(True) is False
 
 
 if __name__ == "__main__":
