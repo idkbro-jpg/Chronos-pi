@@ -10,6 +10,7 @@ testmode_default: true
 
 # Nur diese User dürfen kritische Befehle ausführen
 # Füge deine echte Discord User-ID ein (pi!whoami)
+# Die Beispiel-ID unten wird ignoriert (zählt nicht als Freigabe).
 allowed_users:
   - 123456789012345678   # <-- deine Discord User-ID hier eintragen
 
@@ -35,6 +36,7 @@ mix_file: "mix.yml"
 # limits:
 #   run_timeout_sec: 60
 #   run_max_output: 1800
+#   run_max_chunks: 4
 #   serve_max_minutes: 60
 #   serve_max_concurrent: 5
 #   echo_max_chars: 100000
