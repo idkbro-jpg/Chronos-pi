@@ -74,6 +74,22 @@ def test_mix_aliases_loaded():
     assert "ping-all" in aliases
 
 
+def test_placeholder_stripped_from_bot_allowed_users():
+    cfg = bot._defaults()
+    cfg["allowed_users"] = [bot.PLACEHOLDER_UID, 42]
+    bot._cfg = cfg
+    assert bot.allowed_user_ids() == {42}
+    assert bot.is_allowed(bot.PLACEHOLDER_UID) is False
+    assert bot.is_allowed(42) is True
+
+
+def test_run_max_chunks_helper():
+    bot._cfg = bot._defaults()
+    assert 1 <= bot.run_max_chunks() <= 10
+    bot._cfg["limits"] = {"run_max_chunks": 99}
+    assert bot.run_max_chunks() == 10
+
+
 if __name__ == "__main__":
     tests = [v for k, v in list(globals().items()) if k.startswith("test_") and callable(v)]
     failed = 0
