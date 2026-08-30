@@ -1,0 +1,12 @@
+The last complete bot.py in git history is commit 22f20ae (1279 lines).
+Current main accidentally truncated bot.py to a logging stub.
+
+To restore immediately:
+  git checkout 22f20ae -- bot.py
+
+Then apply v1.1.5 safety (already in start.py/tests on this branch):
+- strip placeholder allowed_users via pi_runtime.allowed_user_ids
+- TESTMODE only from testmode_default on first on_ready
+- run_max_chunks cap
+- expanduser for echo/serve paths
+- pi!aliases info-only command
