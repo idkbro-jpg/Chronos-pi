@@ -74,6 +74,26 @@ def test_mix_aliases_loaded():
     assert "ping-all" in aliases
 
 
+def test_bot_allowed_users_strips_placeholder():
+    cfg = bot._defaults()
+    cfg["allowed_users"] = [bot.PLACEHOLDER_UID, 99]
+    bot._cfg = cfg
+    assert bot.allowed_user_ids() == {99}
+
+
+def test_normalize_user_path_expands_home():
+    expanded = pi_runtime.normalize_user_path(Path("~/chronos-pi-test"))
+    assert str(expanded).startswith(str(Path.home()))
+    assert "~" not in str(expanded)
+
+
+def test_run_max_chunks_helper_on_bot():
+    cfg = bot._defaults()
+    cfg["limits"] = {"run_max_chunks": 99}
+    bot._cfg = cfg
+    assert bot.run_max_chunks() == 10
+
+
 if __name__ == "__main__":
     tests = [v for k, v in list(globals().items()) if k.startswith("test_") and callable(v)]
     failed = 0
