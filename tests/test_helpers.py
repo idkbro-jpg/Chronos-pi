@@ -44,6 +44,30 @@ def test_placeholder_ids_stripped_via_runtime():
     assert ids == {42}
 
 
+def test_bot_allowed_users_strips_placeholder():
+    cfg = bot._defaults()
+    cfg["allowed_users"] = [bot.PLACEHOLDER_UID, 42]
+    bot._cfg = cfg
+    assert bot.allowed_user_ids() == {42}
+    assert bot.is_allowed(bot.PLACEHOLDER_UID) is False
+    assert bot.is_allowed(42) is True
+
+
+def test_run_max_chunks_cap():
+    bot._cfg = bot._defaults()
+    assert bot.run_max_chunks() == 4
+    bot._cfg["limits"]["run_max_chunks"] = 99
+    assert bot.run_max_chunks() == 10
+
+
+def test_tilde_expand_before_allowlist():
+    home_file = Path.home() / "chronos-pi-should-not-pass-unless-home-is-allowed"
+    raw = Path("~/chronos-pi-should-not-pass-unless-home-is-allowed")
+    allowed = bot._is_path_allowed(raw)
+    expected = bot._is_path_allowed(home_file)
+    assert allowed == expected
+
+
 def test_path_allowed_tmp_and_cwd_not_root():
     tmp_file = Path("/tmp/chronos-pi-test-file")
     assert bot._is_path_allowed(tmp_file) is True
