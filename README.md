@@ -3,7 +3,9 @@
 Zweite Instanz des Chronos-Ökosystems – gedacht für den Raspberry Pi (und andere Linux-Hosts).  
 Kann über den Bridge-Channel mit dem Haupt-Chronos kommunizieren.
 
-**Version:** 1.1.4
+**Version:** 1.1.5
+
+`bot.py` is the full companion bot again (it was accidentally truncated to a logging stub in 1.1.4 restore commits). Reconnect-safe TESTMODE, placeholder user-ID deny, run output chunk cap, `~` path expansion, and `pi!aliases` now live in `bot.py` itself.
 
 ## Wichtig: TESTMODE
 
